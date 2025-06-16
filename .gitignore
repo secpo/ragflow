@@ -1,0 +1,21 @@
+/.venv/
+huggingface.co/**/*.bin
+*.bin
+
+# 排除前端目录
+IridumAI-18/
+
+# 排除其他不需要的文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.pytest_cache/
+.DS_Store
+Thumbs.db
+*.log
+flask_session/
+logs/
