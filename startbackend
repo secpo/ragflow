@@ -1,0 +1,180 @@
+#!/bin/bash
+
+RAGFLOW_USER="root" 
+RAGFLOW_DIR=$(pwd) 
+WRAPPER_SCRIPT="$RAGFLOW_DIR/backend_wrapper.sh"
+
+PIDFILE="/var/run/ragflow.pid"
+LOGFILE="/var/log/ragflow.log"
+LOCKFILE="/var/lock/subsys/ragflow"
+
+mkdir -p /var/run /var/log /var/lock/subsys
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+}
+
+is_running() {
+    if [ -f "$PIDFILE" ]; then
+        local pid=$(cat "$PIDFILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            return 0
+        else
+            rm -f "$PIDFILE"
+            return 1
+        fi
+    else
+        return 1
+    fi
+}
+
+start() {
+    echo -n "Prepare to run RAGFlow service... "
+    
+    if is_running; then
+        echo -e "${YELLOW}[ALREADY RUNNING]${NC}"
+        return 0
+    fi
+    
+    # 检查RAGFlow目录和包装脚本
+    if [ ! -d "$RAGFLOW_DIR" ]; then
+        echo -e "${RED}[FAILED]${NC}"
+        echo "Error: RAGFlow directory not found: $RAGFLOW_DIR"
+        return 1
+    fi
+
+    if [ ! -f "$WRAPPER_SCRIPT" ]; then
+        echo -e "${RED}[FAILED]${NC}"
+        echo "Error: Wrapper script not found: $WRAPPER_SCRIPT"
+        return 1
+    fi
+    
+    cd "$RAGFLOW_DIR"
+    log_message "Starting RAGFlow service"
+
+    if [ "$RAGFLOW_USER" = "root" ]; then
+        nohup bash "$WRAPPER_SCRIPT" > "$LOGFILE" 2>&1 &
+        local pid=$!
+    else
+        su - "$RAGFLOW_USER" -c "nohup bash '$WRAPPER_SCRIPT' > '$LOGFILE' 2>&1 & echo \$!"
+        local pid=$!
+    fi
+    
+    sleep 3
+    
+    if ps -p "$pid" > /dev/null 2>&1; then
+        echo "$pid" > "$PIDFILE"
+        touch "$LOCKFILE"
+        echo -e "${GREEN}[OK]${NC}"
+        log_message "RAGFlow started successfully with PID: $pid"
+        return 0
+    else
+        echo -e "${RED}[FAILED]${NC}"
+        log_message "Failed to start RAGFlow"
+        return 1
+    fi
+}
+
+stop() {
+    echo -n "Stopping RAGFlow: "
+    
+    if ! is_running; then
+        echo -e "${YELLOW}[NOT RUNNING]${NC}"
+        return 0
+    fi
+    
+    local pid=$(cat "$PIDFILE")
+    log_message "Stopping RAGFlow service (PID: $pid)"
+    
+    kill "$pid" 2>/dev/null
+    
+    local count=0
+    while [ $count -lt 10 ] && ps -p "$pid" > /dev/null 2>&1; do
+        sleep 1
+        count=$((count + 1))
+    done
+    
+    if ps -p "$pid" > /dev/null 2>&1; then
+        kill -9 "$pid" 2>/dev/null
+        sleep 1
+    fi
+    
+    rm -f "$PIDFILE" "$LOCKFILE"
+    
+    echo -e "${GREEN}[OK]${NC}"
+    log_message "RAGFlow stopped successfully"
+    return 0
+}
+
+restart() {
+    stop
+    sleep 2
+    start
+}
+
+status() {
+    if is_running; then
+        local pid=$(cat "$PIDFILE")
+        echo -e "RAGFlow is ${GREEN}running${NC} (PID: $pid)"
+        return 0
+    else
+        echo -e "RAGFlow is ${RED}not running${NC}"
+        return 1
+    fi
+}
+
+reload() {
+    echo -n "Reloading RAGFlow configuration: "
+    
+    if ! is_running; then
+        echo -e "${RED}[NOT RUNNING]${NC}"
+        return 1
+    fi
+    
+    local pid=$(cat "$PIDFILE")
+    kill -HUP "$pid" 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[OK]${NC}"
+        log_message "RAGFlow configuration reloaded"
+        return 0
+    else
+        echo -e "${RED}[FAILED]${NC}"
+        return 1
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    reload)
+        reload
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload|status}"
+        echo ""
+        echo "  start   - Start RAGFlow service"
+        echo "  stop    - Stop RAGFlow service"
+        echo "  restart - Restart RAGFlow service"
+        echo "  reload  - Reload RAGFlow configuration"
+        echo "  status  - Show RAGFlow service status"
+        exit 1
+        ;;
+esac
+
+exit $?

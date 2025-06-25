@@ -113,6 +113,12 @@ def get_data_error_result(code=settings.RetCode.DATA_ERROR, message="Sorry! Data
 
 
 def server_error_response(e):
+    # Don't log Flask-Login's intermediate 401 exceptions during request_loader processing
+    if hasattr(e, 'code') and e.code == 401 and 'Unauthorized' in str(e):
+        # This is likely a Flask-Login intermediate 401, don't log as exception
+        logging.debug(f"Flask-Login intermediate 401: {e}")
+        return get_json_result(code=401, message=repr(e))
+
     logging.exception(e)
     try:
         if e.code == 401:
